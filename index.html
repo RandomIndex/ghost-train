@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Призрачная электричка</title>
+    <style>
+        :root {
+            --bg-color: #0a0a0a;
+            --text-color: #c0c0c0;
+            --danger-color: #8b0000;
+            --accent-color: #4a4a4a;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #game-container {
+            width: 800px;
+            height: 600px;
+            border: 2px solid var(--accent-color);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            position: relative;
+        }
+
+        /* Атмосферные помехи */
+        #game-container::before {
+            content: " ";
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #stats {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--accent-color);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+
+        #log {
+            flex-grow: 1;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            padding-right: 10px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .log-entry { margin-bottom: 10px; border-left: 2px solid var(--accent-color); padding-left: 10px; }
+        .danger { color: var(--danger-color); font-weight: bold; }
+        .success { color: #00ff00; }
+
+        #visuals {
+            height: 150px;
+            background: #111;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px inset #333;
+            position: relative;
+        }
+
+        .train-car-view {
+            font-size: 12px;
+            color: #444;
+            text-align: center;
+        }
+
+        #controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+
+        button {
+            background: #1a1a1a;
+            border: 1px solid var(--accent-color);
+            color: var(--text-color);
+            padding: 10px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: 0.3s;
+        }
+
+        button:hover:not(:disabled) {
+            background: #333;
+            color: #fff;
+        }
+
+        button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        #inventory {
+            font-size: 12px;
+            margin-top: 10px;
+            color: #888;
+        }
+
+        .monster-warning {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: rgba(139, 0, 0, 0.5);
+            font-size: 40px;
+            pointer-events: none;
+            display: none;
+            animation: flicker 0.1s infinite;
+        }
+
+        @keyframes flicker {
+            0% { opacity: 0.1; }
+            50% { opacity: 0.8; }
+            100% { opacity: 0.1; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="stats">
+        <span>Вагон: <span id="car-num">0</span></span>
+        <span>Голод: <span id="hunger">100</span>%</span>
+        <span>Усталость: <span id="fatigue">0</span>%</span>
+        <span>Деньги: <span id="money">0</span> руб.</span>
+    </div>
+
+    <div id="visuals">
+        <div class="train-car-view" id="view-desc">Тусклый свет мигающих ламп отражается в грязных окнах...</div>
+        <div id="monster-alert" class="monster-warning">ОН РЯДОМ</div>
+    </div>
+
+    <div id="log">
+        <div class="log-entry">Вы очнулись в пустом вагоне. В голове шумит, а за окном — бесконечная пустота. Нужно двигаться в хвост поезда, чтобы выжить. Контролёр вышел из кабины машиниста...</div>
+    </div>
+
+    <div id="inventory">Инвентарь: пуст</div>
+
+    <div id="controls">
+        <button onclick="move(1)">В следующий вагон</button>
+        <button onclick="move(-1)">В предыдущий вагон</button>
+        <button id="search-btn" onclick="searchCar()">Обыскать вагон</button>
+        <button id="sleep-btn" onclick="sleep()">Поспать</button>
+        <button id="eat-btn" onclick="eat()" disabled>Съесть еду</button>
+        <button id="station-btn" onclick="visitStation()" style="display:none;">Зайти в кассу</button>
+    </div>
+</div>
+
+<script>
+    // Состояние игры
+    let state = {
+        car: 0,
+        monsterCar: -5, // Контролёр начинает за 5 вагонов "до" игрока (в голове)
+        hunger: 100,
+        fatigue: 0,
+        money: 0,
+        inventory: [],
+        hasTicket: false,
+        isAtStation: false,
+        searchedCars: new Set(),
+        gameOver: false
+    };
+
+    const logEl = document.getElementById('log');
+
+    function log(text, type = '') {
+        const div = document.createElement('div');
+        div.className = 'log-entry ' + type;
+        div.innerText = text;
+        logEl.prepend(div);
+    }
+
+    function updateUI() {
+        document.getElementById('car-num').innerText = state.car;
+        document.getElementById('hunger').innerText = Math.ceil(state.hunger);
+        document.getElementById('fatigue').innerText = Math.ceil(state.fatigue);
+        document.getElementById('money').innerText = state.money;
+        
+        const invText = state.inventory.length > 0 ? state.inventory.join(', ') : 'пуст';
+        document.getElementById('inventory').innerText = 'Инвентарь: ' + invText + (state.hasTicket ? ' | [БИЛЕТ]' : '');
+
+        // Кнопки
+        document.getElementById('eat-btn').disabled = !state.inventory.includes('Еда');
+        document.getElementById('search-btn').disabled = state.searchedCars.has(state.car);
+        
+        // Предупреждение о монстре
+        const dist = Math.abs(state.car - state.monsterCar);
+        document.getElementById('monster-alert').style.display = dist <= 2 ? 'block' : 'none';
+
+        if (state.gameOver) {
+            document.querySelectorAll('button').forEach(b => b.disabled = true);
+        }
+    }
+
+    function move(dir) {
+        if (state.gameOver) return;
+
+        state.car += dir;
+        state.hunger -= 2;
+        state.fatigue += 3;
+        state.monsterCar += 0.5; // Контролёр медленно идет за вами
+
+        state.isAtStation = Math.random() > 0.8;
+        const stationBtn = document.getElementById('station-btn');
+        if (state.isAtStation) {
+            log("Поезд заскрежетал и остановился у пустой платформы. Здесь есть касса.");
+            stationBtn.style.display = 'block';
+        } else {
+            stationBtn.style.display = 'none';
+        }
+
+        checkEvents();
+        updateUI();
+    }
+
+    function searchCar() {
+        state.searchedCars.add(state.car);
+        state.fatigue += 5;
+        
+        const roll = Math.random();
+        if (roll > 0.7) {
+            const loot = Math.random() > 0.5 ? 'Еда' : 'Странная безделушка';
+            state.inventory.push(loot);
+            log(`Вы нашли: ${loot}`);
+        } else if (roll > 0.4) {
+            const foundMoney = Math.floor(Math.random() * 50) + 10;
+            state.money += foundMoney;
+            log(`Вы нашли пригоршню монет: ${foundMoney} руб.`);
+        } else {
+            log("Вагон пуст, только пыль и тени.");
+        }
+
+        // Шанс встретить просящего квест
+        if (Math.random() > 0.85) {
+            log("В углу сидит тень. Она шепчет: 'Отдай мне безделушку, и я дам тебе денег'...");
+            if (state.inventory.includes('Странная безделушка')) {
+                state.inventory.splice(state.inventory.indexOf('Странная безделушка'), 1);
+                state.money += 150;
+                log("Вы отдали предмет тени. Она растворилась, оставив 150 рублей.", "success");
+            }
+        }
+
+        state.monsterCar += 0.2;
+        checkEvents();
+        updateUI();
+    }
+
+    function sleep() {
+        log("Вы ложитесь на грязное сиденье и проваливаетесь в тяжелый сон...");
+        state.fatigue = Math.max(0, state.fatigue - 40);
+        state.hunger -= 10;
+        
+        // Пока вы спите, монстр проходит 2 вагона
+        state.monsterCar += 2;
+        
+        checkEvents();
+        if (!state.gameOver) {
+            log("Вы проснулись. Стало немного легче, но время упущено.");
+            updateUI();
+        }
+    }
+
+    function eat() {
+        if (state.inventory.includes('Еда')) {
+            state.inventory.splice(state.inventory.indexOf('Еда'), 1);
+            state.hunger = Math.min(100, state.hunger + 30);
+            log("Вы быстро съели сухой паек. Вкус бумаги, но силы вернулись.");
+            updateUI();
+        }
+    }
+
+    function visitStation() {
+        if (state.money >= 300 && !state.hasTicket) {
+            state.money -= 300;
+            state.hasTicket = true;
+            log("Вы купили БИЛЕТ в кассе! Теперь нужно дождаться Контролёра и предъявить его.", "success");
+        } else if (state.money < 300 && !state.hasTicket) {
+            log("Билет стоит 300 рублей. У вас не хватает денег.");
+        }
+        
+        // Можно всегда купить еду
+        if (state.money >= 50) {
+            state.money -= 50;
+            state.inventory.push('Еда');
+            log("Вы купили немного еды в автомате на станции.");
+        }
+        updateUI();
+    }
+
+    function checkEvents() {
+        // Проверка голода
+        if (state.hunger <= 0) {
+            die("Вы умерли от истощения. Ваше тело станет частью этого поезда.");
+        }
+
+        // Проверка усталости
+        if (state.fatigue >= 100) {
+            log("Вы падаете от усталости прямо в проходе...", "danger");
+            sleep();
+        }
+
+        // Встреча с контролёром
+        const dist = state.car - state.monsterCar;
+        
+        if (dist <= 0) {
+            if (state.hasTicket) {
+                win();
+            } else {
+                die("Контролёр положил руку вам на плечо. У вас нет билета. Его лицо — это бездна. Это конец.");
+            }
+        } else if (dist < 1.5) {
+            log("Вы слышите тяжелые шаги и скрежет компостера в соседнем вагоне!", "danger");
+        }
+    }
+
+    function die(msg) {
+        state.gameOver = true;
+        log(msg, "danger");
+        document.getElementById('view-desc').innerText = "ТЬМА ПОГЛОТИЛА ВАС";
+        document.body.style.backgroundColor = "#200";
+    }
+
+    function win() {
+        state.gameOver = true;
+        log("Вы протягиваете билет. Контролёр долго изучает его, затем кивает и уходит в темноту. Поезд останавливается, и двери открываются в ваш мир. Вы свободны!", "success");
+        document.getElementById('view-desc').innerText = "ВЫ ВЫЖИЛИ";
+        document.body.style.backgroundColor = "#020";
+    }
+
+    // Начальное обновление
+    updateUI();
+</script>
+
+</body>
+</html>
