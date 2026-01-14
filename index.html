@@ -136,7 +136,6 @@
     </style>
 </head>
 <body>
-
 <div id="game-container">
     <div id="stats">
         <span>Вагон: <span id="car-num">0</span></span>
@@ -153,7 +152,30 @@
     <div id="log">
         <div class="log-entry">Вы очнулись в пустом вагоне. В голове шумит, а за окном — бесконечная пустота. Нужно двигаться в хвост поезда, чтобы выжить. Контролёр вышел из кабины машиниста...</div>
     </div>
-
+<audio id="player">
+        <source src="horror.mp3" type="audio/mpeg">
+        Ваш браузер не поддерживает аудио.
+    </audio>
+    
+    <button id="playBtn">Включить музыку</button>
+    
+    <script>
+        const player = document.getElementById('player');
+        const playBtn = document.getElementById('playBtn');
+        let isPlaying = false;
+        
+        playBtn.addEventListener('click', function() {
+            if (!isPlaying) {
+                player.play();
+                playBtn.textContent = 'Выключить музыку';
+                isPlaying = true;
+            } else {
+                player.pause();
+                playBtn.textContent = 'Включить музыку';
+                isPlaying = false;
+            }
+        });
+    </script>
     <div id="inventory">Инвентарь: пуст</div>
 
     <div id="controls">
@@ -164,6 +186,7 @@
         <button id="eat-btn" onclick="eat()" disabled>Съесть еду</button>
         <button id="station-btn" onclick="visitStation()" style="display:none;">Зайти в кассу</button>
     </div>
+	
 </div>
 
 <script>
